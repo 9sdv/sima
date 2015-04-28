@@ -147,6 +147,65 @@ class PlaneWiseSegmentation(SegmentationStrategy):
         return rois
 
 
+class _PieceWiseSegmentationParallel(object):
+    def __init__(self, strategy, frame_shape):
+        self.strategy = strategy
+        self.frame_shape = frame_shape
+
+    def __call__(self, dataset):
+        rois = []
+        subset_rois = self.strategy.segment(dataset)
+        for roi in subset_rois:
+            new_masks = []
+            for plane in roi.mask:
+                new_mask = np.zeros(self.frame_shape,dtype=plane.dtype)
+                new_mask[dataset.offset_y:dataset.offset_y+roi.im_shape[1],
+                            dataset.offset_x:dataset.offset_x+roi.im_shape[2]] = plane.todense()
+                new_masks += [new_mask]
+            rois.append(ROI(mask=new_masks))
+
+        return rois
+
+  
+
+class PieceWiseSegmentation(SegmentationStrategy):
+    def __init__(self, strategy,  n_cols=1, n_rows=1, overlap=0, n_processes=1):
+        super(PieceWiseSegmentation, self).__init__()
+        self.strategy = strategy
+        self.n_cols = n_cols
+        self.n_rows = n_rows
+        self.n_processes = n_processes
+        self.overlap = overlap
+
+    def _segment(self, dataset):
+        n_blocks = self.n_rows*self.n_cols
+        row_segments = np.linspace(0,dataset.frame_shape[1],self.n_rows+1).astype(int)
+        col_segments = np.linspace(0,dataset.frame_shape[2],self.n_cols+1).astype(int)
+        subsets = []
+        for block in xrange(n_blocks):
+            x = block%self.n_cols
+            y = int(block/self.n_cols)
+            ylimits = np.clip((row_segments[y]-self.overlap, row_segments[y+1]+self.overlap), 0, 
+                    dataset.frame_shape[1])
+            xlimits = np.clip((col_segments[x]-self.overlap, col_segments[x+1]+self.overlap), 0, 
+                    dataset.frame_shape[2])
+            subsets += [dataset[:,:,:,ylimits[0]:ylimits[1],xlimits[0]:xlimits[1]]]
+            subsets[-1].offset_y = ylimits[0]
+            subsets[-1].offset_x = xlimits[0]
+
+        SegmentFunc = _PieceWiseSegmentationParallel(self.strategy, dataset.frame_shape[1:3])
+        if self.n_processes > 1 and False:
+            pool = Pool(processes=self.n_processes)
+            rois = pool.map(SegmentFunc, subsets)
+            pool.close()
+        else:
+            rois = map(SegmentFunc, subsets)
+
+        import pdb; pdb.set_trace()
+        rois = ROIList([roi for sublist in rois for roi in sublist])
+        return rois
+
+
 class PostProcessingStep(with_metaclass(abc.ABCMeta, object)):
 
     """Abstract class representing the interface for post processing
@@ -296,6 +355,61 @@ class MergeOverlapping(PostProcessingStep):
 
                         rois[i] = ROI(mask=new_shape.astype('bool'))
                         rois[j] = None
+        return ROIList(roi for roi in rois if roi is not None)
+
+
+class MaskedMergeOverlapping(PostProcessingStep):
+    """Post-processing step to merge overlapping ROIs.
+
+    Parameters
+    ----------
+    threshold : float
+        Minimum percent of the smaller ROIs total area which must be covered
+        in order for the ROIs to be evaluated as overlapping.
+
+    """
+    def __init__(self, threshold, mask):
+        if threshold < 0. or threshold > 1.:
+            raise ValueError('percent_overlap must be in the interval [0,1]')
+        self.percent_overlap = threshold
+        self.mask = mask
+
+    def apply(self, rois, dataset=None):
+        """ Remove overlapping ROIs
+
+        Parameters
+        ----------
+        rois : list
+            list of sima.ROI ROIs
+        percent_overlap : float
+            percent of the smaller ROIs total area which must be covered in
+            order for the ROIs to be evaluated as overlapping
+
+        Returns
+        -------
+        rois : list
+            A list of sima.ROI ROI objects with the overlapping ROIs combined
+        """
+
+        for roi in rois:
+            roi.mask = roi.mask
+
+        for i in range(len(rois)):  # TODO: more efficient strategy
+            for j in [j for j in range(len(rois)) if j != i]:
+                if rois[i] is not None and rois[j] is not None:
+                    rois_i = np.array(rois[i])*self.mask
+                    rois_j = np.array(rois[j])*self.mask
+                    overlap = np.logical_and(rois_i, rois_j)
+                    #if np.any(rois_i) and np.any(rois_j):
+                    if np.any(overlap):
+                        small_area = min(np.count_nonzero(rois_i), np.count_nonzero(rois_j))
+
+                        if np.count_nonzero(overlap) > \
+                                self.percent_overlap * small_area:
+                            new_shape = np.logical_or(rois[i], rois[j])
+
+                            rois[i] = ROI(mask=new_shape.astype('bool'))
+                            rois[j] = None
         return ROIList(roi for roi in rois if roi is not None)
 
 
@@ -516,12 +630,19 @@ class _SmoothBoundariesParallel(object):
                 smoothed_coords = np.hstack(
                     (smoothed_coords, plane*np.ones(
                         (smoothed_coords.shape[0], 1))))
+
+                if smoothed_coords.shape[0] < self.min_verts:
+                    smoothed_coords = polygon
+
             else:
                 smoothed_coords = polygon
 
             smoothed_polygons += [smoothed_coords]
 
-        return ROI(polygons=smoothed_polygons, im_shape=roi.im_shape)
+        try:
+            return ROI(polygons=smoothed_polygons, im_shape=roi.im_shape)
+        except:
+            import pdb; pdb.set_trace()
 
 
 class SmoothROIBoundaries(PostProcessingStep):

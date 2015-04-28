@@ -2,10 +2,12 @@ from .segment import (
     SegmentationStrategy,
     CircularityFilter,
     PlaneWiseSegmentation,
+    PieceWiseSegmentation,
     ROIFilter,
     PostProcessingStep,
     SmoothROIBoundaries,
     MergeOverlapping,
+    MaskedMergeOverlapping,
     SparseROIsFromMasks,
 )
 from .stica import STICA
