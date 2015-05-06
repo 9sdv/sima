@@ -201,7 +201,7 @@ class PieceWiseSegmentation(SegmentationStrategy):
         else:
             rois = map(SegmentFunc, subsets)
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         rois = ROIList([roi for sublist in rois for roi in sublist])
         return rois
 
