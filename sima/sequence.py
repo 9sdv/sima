@@ -451,7 +451,10 @@ class Sequence(with_metaclass(ABCMeta, object)):
 
         """
 
-        if fmt not in ['TIFF8', 'TIFF16', 'HDF5']:
+        from sima.misc.progressbar import ProgressBar
+        p = ProgressBar(self.shape[0])
+
+        if fmt not in ['TIFF8', 'TIFF16', 'HDF5', 'memmap']:
             raise ValueError('Unrecognized output format.')
         if (fmt in ['TIFF16', 'TIFF8']) and not np.array(filenames).ndim == 2:
             raise TypeError('Improperly formatted filenames')
@@ -476,6 +479,11 @@ class Sequence(with_metaclass(ABCMeta, object)):
                 chunks=(1, 1, self.shape[2], self.shape[3], 1),
                 compression=compression)
             # TODO: change dtype?
+
+        elif fmt == 'memmap':
+            shape = (np.prod(self.shape[1:]), self.shape[0])
+            f = np.memmap(filenames, mode='w+', dtype=np.float32, order='C',
+                          shape=shape)
 
         if fill_gaps:
             save_frames = _fill_gaps(iter(self), iter(self))
@@ -509,6 +517,8 @@ class Sequence(with_metaclass(ABCMeta, object)):
 
             if fmt == 'HDF5':
                 f['imaging'][f_idx, ...] = frame
+            elif fmt == 'memmap':
+                f[:,f_idx] = np.reshape(frame, shape[0], order='F')
             else:
                 for plane_idx, plane in enumerate(frame):
                     for ch_idx, channel in enumerate(np.rollaxis(plane, -1)):
@@ -519,6 +529,8 @@ class Sequence(with_metaclass(ABCMeta, object)):
                             f.write_page(channel.astype('uint8'))
                         else:
                             raise ValueError('Unrecognized output format.')
+        p.end()
+
         if 'TIFF' in fmt:
             for f in it.chain.from_iterable(output_files):
                 f.close()
@@ -529,6 +541,11 @@ class Sequence(with_metaclass(ABCMeta, object)):
                 f['imaging'].attrs['channel_names'] = [
                     np.string_(s) for s in channel_names]
             f.close()
+        elif fmt == 'memmap':
+            f.flush()
+            del f
+
+
 
 
 class _Sequence_TIFF_Interleaved(Sequence):

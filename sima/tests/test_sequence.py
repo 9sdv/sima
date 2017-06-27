@@ -71,6 +71,20 @@ class TestSequence(object):
         assert_array_equal(next(it), self.tiff_seq._get_frame(0))
         assert_array_equal(next(it), self.tiff_seq._get_frame(1))
 
+    def test_export_memmap(self):
+        filename = os.path.join(self.tmp_dir, 'test_export.mmap')
+        self.tiff_seq.export(
+            filename, fmt='memmap', fill_gaps=False)
+
+        shape = self.tiff_seq.shape[1:][::-1] + (self.tiff_seq.shape[0],)
+        #TODO: why are these dimensions swapped?
+        memmap_seq = sima.Sequence.create('memmap', filename, shape, 'cxyzt')
+
+        assert_almost_equal(memmap_seq._get_frame(0),
+                            self.tiff_seq._get_frame(0))
+        assert_almost_equal(memmap_seq._get_frame(3),
+                            self.tiff_seq._get_frame(3))
+
     @dec.skipif(not h5py_available)
     def test_export_hdf5(self):
         self.tiff_seq.export(
