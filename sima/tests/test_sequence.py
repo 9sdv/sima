@@ -272,7 +272,6 @@ class TestMaskedSequence(object):
         assert_(np.all(np.isnan(masked)[self.masked_mask]))
         assert_(np.all(np.isfinite(masked)[~self.masked_mask]))
 
-
     def test_static_and_single_frame_mask(self):
         frame_mask = np.random.random((128, 256))
         frame_mask = frame_mask > 0.5
@@ -318,7 +317,7 @@ class TestSplicedSequence(object):
     def setup(self):
         self.tiff_seq = sima.Sequence.create('TIFF', example_tiff(), 2, 2)
         self.spliced_sequence = sima.sequence._SplicedSequence(
-            self.tiff_seq, [1,3,4])
+            self.tiff_seq, [1, 3, 4])
 
     def test_init(self):
         assert_equal(len(self.spliced_sequence), 3)
@@ -330,7 +329,8 @@ class TestSplicedSequence(object):
     def test_to_dict(self):
         dict_ = self.spliced_sequence._todict()
         loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
-        assert_equal(np.array(loaded_sequence), np.array(self.spliced_sequence))
+        assert_equal(
+            np.array(loaded_sequence), np.array(self.spliced_sequence))
 
 
 class TestMIPSequence(object):
@@ -350,6 +350,25 @@ class TestMIPSequence(object):
         dict_ = self.mip_sequence._todict()
         loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
         assert_equal(np.array(loaded_sequence), np.array(self.mip_sequence))
+
+
+class TestNaNMeanSequence(object):
+
+    def setup(self):
+        self.tiff_seq = sima.Sequence.create('TIFF', example_tiff(), 2, 2)
+        self.mean_sequence = sima.sequence._NaNMeanSequence(self.tiff_seq)
+
+    def test_init(self):
+        assert_equal(len(self.mean_sequence), len(self.tiff_seq))
+        assert_equal(self.mean_sequence.shape[1], 1)
+        assert_equal(
+            np.nanmean(self.tiff_seq._get_frame(1), 0, keepdims=True),
+            self.mean_sequence._get_frame(1))
+
+    def test_to_dict(self):
+        dict_ = self.mean_sequence._todict()
+        loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
+        assert_equal(np.array(loaded_sequence), np.array(self.mean_sequence))
 
 
 if __name__ == "__main__":

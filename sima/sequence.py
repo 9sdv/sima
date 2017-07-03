@@ -1038,6 +1038,7 @@ class _MotionCorrectedSequence(_WrapperSequence):
             'extent': self._frame_shape[:3],
         }
 
+
 class _MIPSequence(_WrapperSequence):
     """Sequence for applying a NaN Max along one of the dimensions.
 
@@ -1061,6 +1062,45 @@ class _MIPSequence(_WrapperSequence):
     def __iter__(self):
         for frame in self._base:
             yield np.nanmax(frame, axis=self._axis, keepdims=True)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'axis': self._axis
+        }
+
+
+class _NaNMeanSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, axis=0):
+        super(_NaNMeanSequence, self).__init__(base)
+        self._axis = axis
+        self._shape = self._base.shape[:axis+1] + (1,) + \
+            self._base.shape[axis+2:]
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return np.nanmean(frame, axis=self._axis, keepdims=True)
+
+    def __iter__(self):
+        for frame in self._base:
+            yield np.nanmean(frame, axis=self._axis, keepdims=True)
 
     @property
     def shape(self):
