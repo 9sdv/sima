@@ -317,17 +317,39 @@ class TestSplicedSequence(object):
 
     def setup(self):
         self.tiff_seq = sima.Sequence.create('TIFF', example_tiff(), 2, 2)
-        self.spliced_sequence = sima.sequence._SplicedSequence(self.tiff_seq, [1,3,4])
+        self.spliced_sequence = sima.sequence._SplicedSequence(
+            self.tiff_seq, [1,3,4])
 
     def test_init(self):
         assert_equal(len(self.spliced_sequence), 3)
-        assert_equal(self.tiff_seq._get_frame(1), self.spliced_sequence._get_frame(0))
-        assert_equal(self.tiff_seq._get_frame(4), self.spliced_sequence._get_frame(2))
+        assert_equal(
+            self.tiff_seq._get_frame(1), self.spliced_sequence._get_frame(0))
+        assert_equal(
+            self.tiff_seq._get_frame(4), self.spliced_sequence._get_frame(2))
 
     def test_to_dict(self):
         dict_ = self.spliced_sequence._todict()
         loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
         assert_equal(np.array(loaded_sequence), np.array(self.spliced_sequence))
+
+
+class TestMIPSequence(object):
+
+    def setup(self):
+        self.tiff_seq = sima.Sequence.create('TIFF', example_tiff(), 2, 2)
+        self.mip_sequence = sima.sequence._MIPSequence(self.tiff_seq)
+
+    def test_init(self):
+        assert_equal(len(self.mip_sequence), len(self.tiff_seq))
+        assert_equal(self.mip_sequence.shape[1], 1)
+        assert_equal(
+            np.nanmax(self.tiff_seq._get_frame(1), 0, keepdims=True),
+            self.mip_sequence._get_frame(1))
+
+    def test_to_dict(self):
+        dict_ = self.mip_sequence._todict()
+        loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
+        assert_equal(np.array(loaded_sequence), np.array(self.mip_sequence))
 
 
 if __name__ == "__main__":
