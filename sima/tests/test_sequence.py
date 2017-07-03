@@ -313,5 +313,22 @@ class TestMaskedSequence(object):
         assert_(np.all(np.isfinite(masked)[~self.masked_mask]))
 
 
+class TestSplicedSequence(object):
+
+    def setup(self):
+        self.tiff_seq = sima.Sequence.create('TIFF', example_tiff(), 2, 2)
+        self.spliced_sequence = sima.sequence._SplicedSequence(self.tiff_seq, [1,3,4])
+
+    def test_init(self):
+        assert_equal(len(self.spliced_sequence), 3)
+        assert_equal(self.tiff_seq._get_frame(1), self.spliced_sequence._get_frame(0))
+        assert_equal(self.tiff_seq._get_frame(4), self.spliced_sequence._get_frame(2))
+
+    def test_to_dict(self):
+        dict_ = self.spliced_sequence._todict()
+        loaded_sequence = dict_.pop('__class__')._from_dict(dict_)
+        assert_equal(np.array(loaded_sequence), np.array(self.spliced_sequence))
+
+
 if __name__ == "__main__":
     run_module_suite()
