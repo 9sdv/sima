@@ -64,6 +64,8 @@ except ImportError:
 else:
     h5py_available = StrictVersion(h5py.__version__) >= StrictVersion('2.2.1')
 
+from scipy.ndimage.interpolation import geometric_transform
+
 import sima.misc
 from sima.motion._motion import _align_frame
 with warnings.catch_warnings():
@@ -1078,6 +1080,121 @@ class _MIPSequence(_WrapperSequence):
         }
 
 
+from PIL import ImageFont
+from PIL import ImageDraw
+class _AnnotatedSequence(_WrapperSequence):
+    """Sequence for applying a NaN Max along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, text):
+        super(_AnnotatedSequence, self).__init__(base)
+
+        self._shape = base.shape
+        self._text = text
+
+        if isinstance(self._text, list):
+            self._get_text = lambda t: str(self._text[t])
+        else:
+            self._get_text = lambda t: str(self._text)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def _overlay_text(self, frame, t):
+        mask = Image.fromarray(np.zeros(self._shape[2:4]))
+        font = ImageFont.load_default()
+        draw = ImageDraw.Draw(mask)
+
+        for i, line in enumerate(self._get_text(t).split('\n')):
+            draw.text((0,12*i), line, 255, font=font)
+        text_mask = np.array(mask)
+        text_mask = np.expand_dims(text_mask, axis=0)
+        text_mask = np.expand_dims(text_mask, axis=-1)
+
+        frame[np.where(text_mask != 0)] = 8000
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        self._overlay_text(frame, t)
+        return frame
+
+    def __iter__(self):
+        for t, frame in enumerate(self._base):
+            self._overlay_text(frame, t)
+            yield frame
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'text': self._text
+        }
+
+from scipy.ndimage.filters import median_filter
+class _FilteredSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, axis=0):
+        super(_FilteredSequence, self).__init__(base)
+        self._axis = axis
+        self._shape = self._base.shape
+        self._channels = range(self._base.shape[-1])
+        if len(self._channels) == 3:
+            self._channels = [1]
+
+    def _filter(self, frame):
+        for plane in xrange(self.shape[1]):
+            for channel in self._channels:
+                frame[plane, :, :, channel] = median_filter(frame[plane, :, :, channel],
+                                                      size=(4,4))
+
+        return frame
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._filter(frame)
+
+    def __iter__(self):
+        for frame in self._base:
+            yield self._filter(frame)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'axis': self._axis
+        }
+
+
+
 class _NaNMeanSequence(_WrapperSequence):
     """Sequence for applying a NaN Mean along one of the dimensions.
 
@@ -1114,6 +1231,476 @@ class _NaNMeanSequence(_WrapperSequence):
             '__class__': self.__class__,
             'base': self._base._todict(savedir),
             'axis': self._axis
+        }
+
+from sima import ImagingDataset
+from sima.misc.align import align_cross_correlation
+class _TestSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base):
+        super(_TestSequence, self).__init__(base)
+        #self._shape = base.shape
+        vol_path = '/data2/jack/2p/jb97/20171008/TSeries_50019c153cabb7b-002/TSeries_50019c153cabb7b-002.sima'
+        self._vol = ImagingDataset.load(vol_path).time_averages[19:23]
+        self._shape = [base.shape[0], 1] + list(base.shape[2:-1]) + [2]
+
+    def _transform(self, frame, t):
+        frame2 = np.expand_dims(np.zeros(self._vol[0].shape), axis=0)
+        best_corr = -1
+        best_plane = -1
+        shifts = [0, 0]
+        t_plane = 0
+        # if t%5 == 0:
+        #     t_plane=3
+        for i,plane in enumerate(self._vol):
+            new_shifts, corr = align_cross_correlation(self._vol[i], frame[t_plane,100:400,100:400])
+            if corr > best_corr:
+                best_corr = corr
+                shifts = new_shifts
+                best_plane = i
+        print '{} - {}'.format(t_plane, best_plane)
+        self.avg[best_plane, shifts[0]:shifts[0]+300,shifts[1]:300+shifts[1]] += frame[t_plane,100:400,100:400]
+        frame2[0,shifts[0]:shifts[0]+300,shifts[1]:300+shifts[1]] = frame[t_plane,100:400,100:400]
+        frame = np.concatenate((np.expand_dims(self._vol[best_plane], axis=0),frame2), axis=3)
+        return frame
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._transform(frame, t)
+
+    def __iter__(self):
+        for t,frame in enumerate(self._base):
+            yield self._transform(frame, t)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+        }
+
+
+class _NRMCorrectedSequence2(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+    def __init__(self, base, shifts, patch_dims):
+        super(_NRMCorrectedSequence, self).__init__(base)
+        self._shifts = shifts
+        self._patch_dims = patch_dims
+        self._patch_number = len(patch_dims)
+
+    def _transform(self, frame, t):
+        mat = np.full((self._base.shape[2:]), np.nan)
+        counts = np.zeros(self._base.shape[1:])
+
+        data = [[]]
+        for i, plane_shifts in enumerate(self._shifts[t]):
+            (y1, y2), (x1, x2) = self._patch_dims[i%self._patch_number]
+
+            if y2 is None:
+                y2 = frame.shape[1]
+            if x2 is None:
+                x2 = frame.shape[2]
+
+            shifts = plane_shifts[1:]
+            if shifts[0] < 0:
+                y1 -= shifts[0]
+                shifts[0] = 0
+            if shifts[1] < 0:
+                x1 -= shifts[1]
+                shifts[1] = 0
+
+            y2 = min(y1+mat.shape[0]-shifts[0], y2)
+            x2 = min(x1+mat.shape[1]-shifts[1], x2)
+
+            data = frame[int(i/self._patch_number), y1:y2, x1:x2, -1:None]
+            mod = np.tile(np.linspace(1,0,15), (data.shape[0],1))
+            data[:,-15:,0]*= mod
+            import pdb; pdb.set_trace()
+
+            f_counts = np.zeros(self._base.shape[2:])
+            f_counts[shifts[0]:shifts[0]+(y2-y1),
+                    shifts[1]:shifts[1]+(x2-x1)] = data.astype(bool)
+
+            overlap = np.where((f_counts+counts[0]) == 2)
+            if len(overlap[0]):
+                oy = (min(overlap[0]), max(overlap[0]))
+                ox = (min(overlap[1]), max(overlap[1]))
+                dy = np.diff(oy)[0]
+                dx = np.diff(ox)[0]
+                mod = np.tile(np.linspace(1,0,dx+1), (dy+1))
+                rmod = np.tile(np.linspace(0,1,dx+1), (dy+1))
+                t_mat = np.full((self._base.shape[2:]), np.nan)
+                t_mat[shifts[0]:shifts[0]+(y2-y1),
+                      shifts[1]:shifts[1]+(x2-x1)] = data
+                mat[overlap] = mat[overlap]*mod+t_mat[overlap]*rmod
+                t_mat[overlap] = np.nan
+                mat[np.where(np.isfinite(t_mat))] = t_mat[np.where(np.isfinite(t_mat))]
+            else:
+                mat[shifts[0]:shifts[0]+(y2-y1),
+                        shifts[1]:shifts[1]+(x2-x1)] = data
+
+            #counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+            #       shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
+            counts = np.nan_to_num(mat).astype(bool)
+
+        return mat
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._transform(frame, t)
+
+    def __iter__(self):
+        for t,frame in enumerate(self._base):
+            yield self._transform(frame, t)
+
+    @property
+    def shape(self):
+        #return self._shape
+        return self._base.shape
+
+    def __len__(self):
+        return self.shape[0]
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'shifts': self._shifts,
+            'patch_dims': self._patch_dims,
+        }
+
+
+class _NRMCorrectedSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    displacements: list of list of displacements per frame
+    patch_dims: list of patches boundries per plane of imaging data in the
+                format ((ymin, ymax), (xmin, xmax))
+    """
+
+    def __init__(self, base, patch_dims, displacements):
+        super(_NRMCorrectedSequence, self).__init__(base)
+        self._shape = self._base.shape
+        self._displacements = displacements
+        self._patch_dims = patch_dims
+        self._patch_number = len(patch_dims)
+
+    def _transform(self, frame, t):
+        frame2 = np.zeros(self._shape[1:])
+        counts = np.zeros(self._shape[1:])
+
+        if t < len(self._displacements):
+            for i, plane_shifts in enumerate(self._displacements[t]):
+                (y1, y2), (x1, x2) = self._patch_dims[i%self._patch_number]
+
+                if y2 is None or y2 > frame.shape[1]:
+                    y2 = frame.shape[1]
+                if x2 is None or x2 > frame.shape[2]:
+                   x2 = frame.shape[2]
+
+                shifts = plane_shifts[1:]
+                if len(shifts) == 3:
+                    shifts[1] = shifts[1]-shifts[2]/2
+                if shifts[0] < 0:
+                    y1 -= shifts[0]
+                    shifts[0] = 0
+                if shifts[1] < 0:
+                    x1 -= shifts[1]
+                    shifts[1] = 0
+
+                y2 = min(y1+frame2.shape[1]-shifts[0], y2)
+                x2 = min(x1+frame2.shape[2]-shifts[1], x2)
+
+                data = frame[int(i/self._patch_number), y1:y2, x1:x2]
+                frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                        shifts[1]:shifts[1]+(x2-x1)] += data
+                counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                        shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
+
+        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
+        return frame2
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._transform(frame, t)
+
+    def __iter__(self):
+        for t,frame in enumerate(self._base):
+            yield self._transform(frame, t)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return self.shape[0]
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'displacements': self._displacements,
+            'patch_dims': self._patch_dims,
+        }
+
+
+class _3dRegSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, displacements, patch_dims, reference_volume):
+        super(_3dRegSequence, self).__init__(base)
+        self._vol = reference_volume
+        self._normal = True
+        if not self._normal:
+            self._shape = tuple([base.shape[0]*len(displacements[0])] + list(self._vol.shape[:-1]) + [3])
+        else:
+            self._shape = tuple([base.shape[0]] + list(self._vol.shape[:-1]) + [3])
+
+        self._displacements = displacements
+        self._patch_dims = patch_dims
+        self._patch_number = len(patch_dims)
+
+    def _transform_p(self, frame, t):
+        frame2 = np.zeros(self._vol.shape)
+        counts = np.zeros(self._vol.shape)
+
+        patch_idx = t%len(self._displacements[0])
+        plane_idx = patch_idx//self._patch_number
+        frame_idx = t//len(self._displacements[0])
+        if frame_idx < len(self._displacements):
+            plane_shifts = self._displacements[frame_idx][patch_idx]
+            (y1, y2), (x1, x2) = self._patch_dims[t%self._patch_number]
+
+            if y2 is None:
+                y2 = frame.shape[1]
+            if x2 is None:
+                x2 = frame.shape[2]
+
+            shifts = plane_shifts[1:]
+            if len(shifts) == 3:
+                shifts[1] = shifts[1]-shifts[2]/2
+            if shifts[0] < 0:
+                y1 -= shifts[0]
+                shifts[0] = 0
+            if shifts[1] < 0:
+                x1 -= shifts[1]
+                shifts[1] = 0
+
+            y2 = min(y1+frame2.shape[1]-shifts[0], y2)
+            x2 = min(x1+frame2.shape[2]-shifts[1], x2)
+
+            data = frame[plane_idx, y1:y2, x1:x2, -1:None]
+            if len(shifts) == 3 and shifts[2] != 0:
+                data = np.expand_dims(
+                    self.skew_image(data.squeeze(), shifts[-1]),
+                    -1)
+            frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                    shifts[1]:shifts[1]+(x2-x1)] += data
+            counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                    shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
+
+        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
+        return np.concatenate((self._vol, frame2, counts), axis=-1)
+
+    def _transform(self, frame, t):
+        frame2 = np.zeros(self._vol.shape)
+        counts = np.zeros(self._vol.shape)
+
+        if t < len(self._displacements):
+            for i, plane_shifts in enumerate(self._displacements[t]):
+                (y1, y2), (x1, x2) = self._patch_dims[i%self._patch_number]
+
+                if y2 is None or y2 > frame.shape[1]:
+                    y2 = frame.shape[1]
+                if x2 is None or x2 > frame.shape[2]:
+                   x2 = frame.shape[2]
+
+                shifts = plane_shifts[1:]
+                if len(shifts) == 3:
+                    shifts[1] = shifts[1]-shifts[2]/2
+                if shifts[0] < 0:
+                    y1 -= shifts[0]
+                    shifts[0] = 0
+                if shifts[1] < 0:
+                    x1 -= shifts[1]
+                    shifts[1] = 0
+
+                y2 = min(y1+frame2.shape[1]-shifts[0], y2)
+                x2 = min(x1+frame2.shape[2]-shifts[1], x2)
+
+                data = frame[int(i/self._patch_number), y1:y2, x1:x2, -1:None]
+                if len(shifts) == 3 and shifts[2] != 0:
+                    data = np.expand_dims(
+                        self.skew_image(data.squeeze(), shifts[-1]),
+                        -1)
+                frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                        shifts[1]:shifts[1]+(x2-x1)] += data
+                counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
+                        shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
+
+        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
+        return np.concatenate((self._vol, frame2, counts), axis=-1)
+
+    def _get_frame(self, t):
+        if self._normal:
+            frame = self._base._get_frame(t)
+            return self._transform(frame, t)
+
+        frame = self._base._get_frame(t//len(self._displacements[0]))
+        return self._transform_p(frame, t)
+
+    def __iter__(self):
+        if self._normal:
+            for t,frame in enumerate(self._base):
+                yield self._transform(frame, t)
+
+        for t,frame in enumerate(self._base):
+            yield self._transform_p(frame, t//len(self._displacements[0]))
+
+    def skew_image(self, frame, dl):
+        container = np.zeros(map(lambda i: i+2, frame.shape))
+        orig_shape = frame.shape
+        container[1:-1, 1:-1] = frame
+        frame = container
+
+        h,l = frame.shape
+        def mapping(lc):
+            l,c=lc
+            dec=(dl*(l-h))/h
+            return l,c+dec
+
+        def nmapping(lc):
+            l,c=lc
+            dec=-(dl*(l-h))/h
+            return l,c+dec-dl
+
+
+        if dl < 1:
+            map_func = nmapping
+        else:
+            map_func = mapping
+        dl = abs(dl)
+
+        res = geometric_transform(frame, map_func, (h,l+dl), order=5, mode='nearest')[1:-1,1:-1]
+        res = res[:, dl/2:-dl/2]
+        if res.shape != orig_shape:
+            import pdb; pdb.set_trace()
+        return res
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return self.shape[0]
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'displacements': self._displacements,
+            'patch_dims': self._patch_dims,
+            'reference_volume': self._vol
+        }
+
+
+
+class _DsSequence(_WrapperSequence):
+    """Sequence for applying a NaN Mean along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, ds_factor=2):
+        super(_DsSequence, self).__init__(base)
+
+        r = np.zeros([base.shape[3]]*2)
+        for i in xrange(ds_factor):
+            np.fill_diagonal(r[i:], 1.0/ds_factor)
+        r = r[:,::ds_factor]
+        self._r = r
+
+        l = np.zeros([base.shape[2]]*2)
+        np.fill_diagonal(l, 1.0/ds_factor)
+        for i in xrange(ds_factor):
+            np.fill_diagonal(l[:,i:], 1.0/ds_factor)
+        l = l[::ds_factor]
+        self._l = l
+
+        self._ds_factor = ds_factor
+        self._shape = tuple([base.shape[0]] + list(self._get_frame(0).shape))
+
+    def _down_sample(self, frame):
+        result = None
+        for plane in frame:
+            frame_2d = plane[:, :, 0]
+
+            new_frame = self._l.dot(np.nan_to_num(frame_2d).dot(self._r))
+            new_frame = np.expand_dims(
+                np.expand_dims(new_frame, axis=-1), axis=0)
+
+            if result is None:
+                result = new_frame
+            else:
+                result = np.vstack((result, new_frame))
+
+        return result
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._down_sample(frame)
+
+    def __iter__(self):
+        for frame in self._base:
+            yield self._down_sample(frame)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'ds_factor': self._ds_factor
         }
 
 
@@ -1273,7 +1860,6 @@ class _SplicedSequence(_WrapperSequence):
             'base': self._base._todict(savedir),
             'times': self._times
         }
-
 
 class _IndexedSequence(_WrapperSequence):
 
