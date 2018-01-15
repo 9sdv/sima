@@ -71,7 +71,7 @@ def auto_choose(d):
     dictionary."""
     try:
         return max(iter(d.values()), key=lambda x: x['timestamp'])
-    except:
+    except (TypeError, KeyError):
         return max(iter(d.values()), key=lambda x: x.timestamp)
 
 

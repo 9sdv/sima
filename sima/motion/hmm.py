@@ -136,8 +136,8 @@ def _whole_frame_shifting(dataset, shifts):
             h = shift + frame.shape[:-1]
             reference[
                 low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.nan_to_num(frame)
-            sum_squares[low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.nan_to_num(
-                frame ** 2)
+            sum_squares[low[0]:h[0], low[1]:h[1], low[2]:h[2]] += \
+                np.nan_to_num(frame ** 2)
             count[low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.isfinite(frame)
         else:  # plane-specific shifts
             for plane, p_shifts, ref, ssq, cnt in zip(
