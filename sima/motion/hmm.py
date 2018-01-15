@@ -132,10 +132,11 @@ def _whole_frame_shifting(dataset, shifts):
         if shift.ndim == 1:  # single shift for the whole volume
             if any(x is np.ma.masked for x in shift):
                 continue
-            l = shift - min_shifts
+            l0 = shift - min_shifts
             h = shift + frame.shape[:-1]
-            reference[l[0]:h[0], l[1]:h[1], l[2]:h[2]] += np.nan_to_num(frame)
-            sum_squares[l[0]:h[0], l[1]:h[1], l[2]:h[2]] += np.nan_to_num(
+            reference[
+                l0[0]:h[0], l0[1]:h[1], l0[2]:h[2]] += np.nan_to_num(frame)
+            sum_squares[l0[0]:h[0], l0[1]:h[1], l0[2]:h[2]] += np.nan_to_num(
                 frame ** 2)
             count[l[0]:h[0], l[1]:h[1], l[2]:h[2]] += np.isfinite(frame)
         else:  # plane-specific shifts
