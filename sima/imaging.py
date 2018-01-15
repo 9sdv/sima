@@ -728,7 +728,7 @@ class ImagingDataset(object):
 
         try:
             depth = np.array(filenames).ndim
-        except:
+        except Exception:
             raise TypeError('Improperly formatted filenames')
         if (fmt in ['TIFF16', 'TIFF8']) and not depth == 3:
             raise TypeError('Improperly formatted filenames')
