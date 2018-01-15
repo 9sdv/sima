@@ -132,13 +132,13 @@ def _whole_frame_shifting(dataset, shifts):
         if shift.ndim == 1:  # single shift for the whole volume
             if any(x is np.ma.masked for x in shift):
                 continue
-            l0 = shift - min_shifts
+            low = shift - min_shifts
             h = shift + frame.shape[:-1]
             reference[
-                l0[0]:h[0], l0[1]:h[1], l0[2]:h[2]] += np.nan_to_num(frame)
-            sum_squares[l0[0]:h[0], l0[1]:h[1], l0[2]:h[2]] += np.nan_to_num(
+                low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.nan_to_num(frame)
+            sum_squares[low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.nan_to_num(
                 frame ** 2)
-            count[l[0]:h[0], l[1]:h[1], l[2]:h[2]] += np.isfinite(frame)
+            count[low[0]:h[0], low[1]:h[1], low[2]:h[2]] += np.isfinite(frame)
         else:  # plane-specific shifts
             for plane, p_shifts, ref, ssq, cnt in zip(
                     frame, shift, reference, sum_squares, count):
@@ -565,14 +565,14 @@ class MovementModel(object):
                 y[idx] = past_future[i, j] + past_future[j, i]
                 idx_2 = 0
                 for k in range(D):
-                    for l in range(k + 1):
+                    for ll in range(k + 1):
                         if k == i:
-                            M[idx, idx_2] += past_past[j, l]
-                        elif l == i:
+                            M[idx, idx_2] += past_past[j, ll]
+                        elif ll == i:
                             M[idx, idx_2] += past_past[j, k]
                         if k == j:
-                            M[idx, idx_2] += past_past[i, l]
-                        elif l == j:
+                            M[idx, idx_2] += past_past[i, ll]
+                        elif ll == j:
                             M[idx, idx_2] += past_past[i, k]
                         idx_2 += 1
                 idx += 1
