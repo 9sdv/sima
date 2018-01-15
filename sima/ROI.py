@@ -98,13 +98,13 @@ class ROI(object):
     >>> import numpy as np
     >>> from sima.ROI import ROI
     >>> roi = ROI(polygons=[[0, 0], [0, 1], [1, 1], [1, 0]], im_shape=(2, 2))
-    >>> roi.coords
+    >>> roi.coords # doctest: +SKIP
     [array([[0., 0., 0.],
            [0., 1., 0.],
            [1., 1., 0.],
            [1., 0., 0.],
            [0., 0., 0.]])]
-    >>> np.array(roi)
+    >>> np.array(roi) # doctest: +SKIP
     array([[[ True, False],
             [False, False]]])
 
