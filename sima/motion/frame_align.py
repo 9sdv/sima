@@ -19,6 +19,7 @@ import scipy.ndimage.filters
 
 from . import motion
 from sima.misc.align import align_cross_correlation
+from sima.misc.progressbar import ProgressBar
 
 # Setup global variables used during parallelized whole frame shifting
 lock = 0
@@ -49,7 +50,7 @@ class PlaneTranslation2D(motion.MotionEstimationStrategy):
     """
 
     def __init__(self, max_displacement=None, method='correlation',
-                 n_processes=1):
+                 n_processes=1, **kwargs):
         self._params = dict(locals())
         del self._params['self']
 
@@ -114,6 +115,11 @@ def _frame_alignment_base(
     namespace.min_shift = np.zeros(3)
     namespace.max_shift = np.zeros(3)
 
+    print 'calculating frame alignment ...'
+    namespace.count = 0
+    namespace.progress = ProgressBar(
+        dataset.num_sequences*seq.shape[0]*seq.shape[1])
+
     lock = multiprocessing.Lock()
     if n_processes > 1:
         pool = multiprocessing.Pool(processes=n_processes, maxtasksperchild=1)
@@ -153,11 +159,14 @@ def _frame_alignment_base(
 
     shifts = [s[..., 1:] for s in namespace.shifts]
     correlations = namespace.correlations
+    namespace.progress.end()
 
     del namespace.pixel_counts
     del namespace.pixel_sums
     del namespace.shifts
     del namespace.correlations
+    del namespace.count
+    del namespace.progress
 
     _align_planes(shifts)
     return shifts, correlations
@@ -261,6 +270,8 @@ def _align_frame(inputs):
                         np.expand_dims(plane, 0))
                 namespace.min_shift = np.minimum(shift, min_shift)
                 namespace.max_shift = np.maximum(shift, max_shift)
+                namespace.count += 1
+                namespace.progress.update(namespace.count)
 
 
 def _update_reference(sums, counts, offset, displacement, image):
