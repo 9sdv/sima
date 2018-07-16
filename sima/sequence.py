@@ -1226,86 +1226,6 @@ from scipy.ndimage.filters import median_filter
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.filters import rank_filter
 from scipy.signal import wiener
-class _FilteredSequence(_WrapperSequence):
-    """Sequence for applying a NaN Mean along one of the dimensions.
-
-    Parameters
-    ----------
-    base : Sequence
-    axis : axis to perform nanmean along
-
-    """
-
-    def __init__(self, base, axis=0):
-        super(_FilteredSequence, self).__init__(base)
-        self._axis = axis
-        self._shape = self._base.shape
-        self._channels = range(self._base.shape[-1])
-        #self._filter_func = median_filter
-        self._filter_func = self.func2
-        #self._kwargs = {'size': (4,4)}
-        self._kwargs = {}
-        if len(self._channels) == 3:
-            self._channels = [1]
-
-
-    def func(self, img):
-        #img = gaussian_filter(img, 1)
-        f = np.vectorize(lambda x: x**2, otypes=[np.float])
-        img = median_filter(img, (4,4))
-        return f(img)
-
-    def func2(self, img):
-        return rank_filter(img, int(0.8*4**2), size=(4,4))
-
-    def _filter(self, frame):
-        for plane in xrange(self.shape[1]):
-            for channel in self._channels:
-                frame[plane, :, :, channel] = self._filter_func(frame[plane, :, :, channel],
-                                                      **self._kwargs)
-
-        return frame
-
-    def _filter2(self, slice_):
-        r = 4
-        frame = np.zeros(self.shape[1:])
-        for plane in xrange(self.shape[1]):
-            for channel in self._channels:
-                frame[plane, :, :, channel] = rank_filter(
-                    slice_[:,plane,:,:,channel], int(0.8*5*r*r), size=(5,r,r))[0]
-
-        return frame
-
-    def _get_frame2(self, t):
-        frame = self._base._get_frame(t)
-        return self._filter2(frame)
-
-    def _get_frame(self, t):
-        try:
-            slice_ = np.array(self._base[t:t+5])
-        except:
-            slice_ = np.array(self._base[t-5:t])
-
-        return self._filter2(slice_)
-
-    def __iter__(self):
-        for frame in self._base:
-            yield self._filter(frame)
-
-    @property
-    def shape(self):
-        return self._shape
-
-    def __len__(self):
-        return len(self._base)
-
-    def _todict(self, savedir=None):
-        return {
-            '__class__': self.__class__,
-            'base': self._base._todict(savedir),
-            'axis': self._axis
-        }
-
 class _RankFilteredSequence(_WrapperSequence):
     """Sequence for applying a NaN Mean along one of the dimensions.
 
@@ -1322,7 +1242,7 @@ class _RankFilteredSequence(_WrapperSequence):
         self._shape = self._base.shape
         self._channels = range(self._base.shape[-1])
         self._kwargs = {}
-        self.times = 16
+        self.times = 8
         if len(self._channels) == 3:
             self._channels = [1]
 
@@ -1333,10 +1253,11 @@ class _RankFilteredSequence(_WrapperSequence):
         img = median_filter(img, (4,4))
         return f(img)
 
+
     def _filter2(self, slice_):
         r = 4
         frame = np.zeros(self.shape[1:])
-        for plane in xrange(self.shape[1]):
+        for plane in range(self.shape[1]):
             for channel in self._channels:
                 frame[plane, :, :, channel] = rank_filter(
                     slice_[:,plane,:,:,channel], int(0.8*5*r*r), size=(5,r,r))[0]
@@ -1346,13 +1267,12 @@ class _RankFilteredSequence(_WrapperSequence):
     def _filter(self, slice_):
         r = 1
         frame = np.zeros(self.shape[1:])
-        for plane in xrange(self.shape[1]):
+        for plane in range(self.shape[1]):
             for channel in self._channels:
                 frame[plane, :, :, channel] = rank_filter(
                     slice_[:,plane,:,:,channel], int(0.8*self.times*r*r), size=(self.times,r,r))[0]
 
         return frame
-
 
     def _get_frame(self, t):
         try:
@@ -1452,14 +1372,11 @@ class _TimeAvgSequence(_WrapperSequence):
 
     def _get_frame(self, t):
         t = max(0, t)
-        try:
-            frame = np.nanmean(self._base[t*self._factor:(t+1)*self._factor], axis=0)
-        except:
-            import pdb; pdb.set_trace()
+        frame = np.nanmean(self._base[t*self._factor:(t+1)*self._factor], axis=0)
         return frame
 
     def __iter__(self):
-        for t in xrange(self.shape[0]):
+        for t in range(self.shape[0]):
             yield self._get_frame(t)
 
     @property
@@ -2015,14 +1932,14 @@ class _DsSequence(_WrapperSequence):
         super(_DsSequence, self).__init__(base)
 
         r = np.zeros([base.shape[3]]*2)
-        for i in xrange(ds_factor):
+        for i in range(ds_factor):
             np.fill_diagonal(r[i:], 1.0/ds_factor)
         r = r[:,::ds_factor]
         self._r = r
 
         l = np.zeros([base.shape[2]]*2)
         np.fill_diagonal(l, 1.0/ds_factor)
-        for i in xrange(ds_factor):
+        for i in range(ds_factor):
             np.fill_diagonal(l[:,i:], 1.0/ds_factor)
         l = l[::ds_factor]
         self._l = l
