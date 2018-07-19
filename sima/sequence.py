@@ -1692,7 +1692,6 @@ class _NRMCorrectedSequence2(_WrapperSequence):
             data = frame[int(i/self._patch_number), y1:y2, x1:x2, -1:None]
             mod = np.tile(np.linspace(1,0,15), (data.shape[0],1))
             data[:,-15:,0]*= mod
-            import pdb; pdb.set_trace()
 
             f_counts = np.zeros(self._base.shape[2:])
             f_counts[shifts[0]:shifts[0]+(y2-y1),
@@ -1822,183 +1821,6 @@ class _NRMCorrectedSequence(_WrapperSequence):
             'displacements': self._displacements,
             'patch_dims': self._patch_dims,
         }
-
-
-class _3dRegSequence(_WrapperSequence):
-    """Sequence for applying a NaN Mean along one of the dimensions.
-
-    Parameters
-    ----------
-    base : Sequence
-    axis : axis to perform nanmean along
-
-    """
-
-    def __init__(self, base, displacements, patch_dims, reference_volume):
-        super(_3dRegSequence, self).__init__(base)
-        self._vol = reference_volume
-        self._normal = True
-        if not self._normal:
-            self._shape = tuple([base.shape[0]*len(displacements[0])] + list(self._vol.shape[:-1]) + [3])
-        else:
-            self._shape = tuple([base.shape[0]] + list(self._vol.shape[:-1]) + [3])
-
-        self._displacements = displacements
-        self._patch_dims = patch_dims
-        self._patch_number = len(patch_dims)
-
-    """
-    def _transform_p(self, frame, t):
-        frame2 = np.zeros(self._vol.shape)
-        counts = np.zeros(self._vol.shape)
-
-        patch_idx = t%len(self._displacements[0])
-        plane_idx = patch_idx//self._patch_number
-        frame_idx = t//len(self._displacements[0])
-        if frame_idx < len(self._displacements):
-            plane_shifts = self._displacements[frame_idx][patch_idx]
-            (y1, y2), (x1, x2) = self._patch_dims[t%self._patch_number]
-
-            if y2 is None:
-                y2 = frame.shape[1]
-            if x2 is None:
-                x2 = frame.shape[2]
-
-            shifts = plane_shifts[1:]
-            if len(shifts) == 3:
-                shifts[1] = shifts[1]-shifts[2]/2
-            if shifts[0] < 0:
-                y1 -= shifts[0]
-                shifts[0] = 0
-            if shifts[1] < 0:
-                x1 -= shifts[1]
-                shifts[1] = 0
-
-            y2 = min(y1+frame2.shape[1]-shifts[0], y2)
-            x2 = min(x1+frame2.shape[2]-shifts[1], x2)
-
-            data = frame[plane_idx, y1:y2, x1:x2, -1:None]
-            if len(shifts) == 3 and shifts[2] != 0:
-                data = np.expand_dims(
-                    self.skew_image(data.squeeze(), shifts[-1]),
-                    -1)
-            frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                    shifts[1]:shifts[1]+(x2-x1)] += data
-            counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                    shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
-
-        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
-        return np.concatenate((self._vol, frame2, counts), axis=-1)
-    """
-
-    def _transform(self, frame, t):
-        frame2 = np.zeros(self._vol.shape)
-        counts = np.zeros(self._vol.shape)
-
-        if t < len(self._displacements):
-            for i, plane_shifts in enumerate(self._displacements[t]):
-                (y1, y2), (x1, x2) = self._patch_dims[i%self._patch_number]
-
-                if y2 is None or y2 > frame.shape[1]:
-                    y2 = frame.shape[1]
-                if x2 is None or x2 > frame.shape[2]:
-                   x2 = frame.shape[2]
-
-                shifts = plane_shifts[1:]
-                if len(shifts) == 3:
-                    shifts[1] = shifts[1]-shifts[2]/2
-                if shifts[0] < 0:
-                    y1 -= shifts[0]
-                    shifts[0] = 0
-                if shifts[1] < 0:
-                    x1 -= shifts[1]
-                    shifts[1] = 0
-
-                y2 = min(y1+frame2.shape[1]-shifts[0], y2)
-                x2 = min(x1+frame2.shape[2]-shifts[1], x2)
-                if y1 >= y2 or x1 >= x2:
-                    continue
-
-                y1, y2, x1, x2 = map(int, [y1, y2, x1, x2])
-                data = frame[int(i//self._patch_number), y1:y2, x1:x2, -1:None]
-                if len(shifts) == 3 and shifts[2] != 0:
-                    data = np.expand_dims(
-                        self.skew_image(data.squeeze(), shifts[-1]),
-                        -1)
-                #frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                #        shifts[1]:shifts[1]+(x2-x1)] += data
-                shifts = [shift for shift in map(int, shifts)]
-                try:
-                    frame2[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                            shifts[1]:shifts[1]+(x2-x1)] = data
-                except:
-                    import pdb; pdb.set_trace()
-                #counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                #        shifts[1]:shifts[1]+(x2-x1)] += data.astype(bool)
-                counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                        shifts[1]:shifts[1]+(x2-x1)] = data.astype(bool)
-
-        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
-        return np.concatenate((self._vol, frame2, counts), axis=-1)
-
-    def _get_frame(self, t):
-        frame = self._base._get_frame(t)
-        return self._transform(frame, t)
-
-    def __iter__(self):
-        if self._normal or True:
-            for t,frame in enumerate(self._base):
-                yield self._transform(frame, t)
-
-        #for t,frame in enumerate(self._base):
-        #    yield self._transform_p(frame, t//len(self._displacements[0]))
-
-    def skew_image(self, frame, dl):
-        container = np.zeros(map(lambda i: i+2, frame.shape))
-        orig_shape = frame.shape
-        container[1:-1, 1:-1] = frame
-        frame = container
-
-        h,l = frame.shape
-        def mapping(lc):
-            l,c=lc
-            dec=(dl*(l-h))/h
-            return l,c+dec
-
-        def nmapping(lc):
-            l,c=lc
-            dec=-(dl*(l-h))/h
-            return l,c+dec-dl
-
-
-        if dl < 1:
-            map_func = nmapping
-        else:
-            map_func = mapping
-        dl = abs(dl)
-
-        res = geometric_transform(frame, map_func, (h,l+dl), order=5, mode='nearest')[1:-1,1:-1]
-        res = res[:, dl/2:-dl/2]
-        if res.shape != orig_shape:
-            import pdb; pdb.set_trace()
-        return res
-
-    @property
-    def shape(self):
-        return self._shape
-
-    def __len__(self):
-        return self.shape[0]
-
-    def _todict(self, savedir=None):
-        return {
-            '__class__': self.__class__,
-            'base': self._base._todict(savedir),
-            'displacements': self._displacements,
-            'patch_dims': self._patch_dims,
-            'reference_volume': self._vol
-        }
-
 
 
 class _DsSequence(_WrapperSequence):
@@ -2445,7 +2267,7 @@ class _3dRegSequence(_WrapperSequence):
         counts = np.zeros(self._vol.shape)
 
         if t < len(self._displacements):
-            for i, plane_shifts in enumerate(self._displacements[t]):
+            for i, plane_shifts in enumerate(np.array(self._displacements[t])):
                 (y1, y2), (x1, x2) = self._patch_dims[i%self._patch_number]
 
                 if y2 is None or y2 > frame.shape[1]:
