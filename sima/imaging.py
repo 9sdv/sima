@@ -121,7 +121,7 @@ class ImagingDataset(object):
                                 'or a directory.')
 
             with open(join(savedir, 'dataset.pkl'), 'rb') as f:
-                data = pickle.load(f)
+                data = pickle.load(f, fix_imports=True)
             if 'sequences' in data:
                 # 1.0.0-dev sets stored sequences in dataset.pkl. Without this
                 # check a later call to ImagingDataset.sequences will fail.
@@ -173,7 +173,7 @@ class ImagingDataset(object):
                 return sequence.pop('__class__')._from_dict(
                     sequence, self.savedir)
             with open(join(self.savedir, 'sequences.pkl'), 'rb') as f:
-                sequences = pickle.load(f)
+                sequences = pickle.load(f, fix_imports=True, encoding='latin1')
             self._sequences = [unpack(seq) for seq in sequences]
             if not np.all([seq.shape[1:] == self._sequences[0].shape[1:]
                            for seq in self._sequences]):
@@ -271,7 +271,7 @@ class ImagingDataset(object):
             try:
                 with open(join(self.savedir, 'time_averages.pkl'),
                           'rb') as f:
-                    time_averages = pickle.load(f)
+                    time_averages = pickle.load(f, fix_imports=True)
             except IOError:
                 pass
             else:
@@ -291,7 +291,7 @@ class ImagingDataset(object):
         averages = old_div(sums, counts)
         if self.savedir is not None and not self._read_only:
             with open(join(self.savedir, 'time_averages.pkl'), 'wb') as f:
-                pickle.dump(averages, f, pickle.HIGHEST_PROTOCOL)
+                pickle.dump(averages, f, 2)
         self._time_averages = averages
         return self._time_averages
 
@@ -303,7 +303,7 @@ class ImagingDataset(object):
             try:
                 with open(join(self.savedir, 'time_std.pkl'),
                           'rb') as f:
-                    time_std = pickle.load(f)
+                    time_std = pickle.load(f, fix_imports=True)
             except IOError:
                 pass
             else:
@@ -326,7 +326,7 @@ class ImagingDataset(object):
         std = np.sqrt(mean_of_squares-np.square(means))
         if self.savedir is not None and not self._read_only:
             with open(join(self.savedir, 'time_std.pkl'), 'wb') as f:
-                pickle.dump(std, f, pickle.HIGHEST_PROTOCOL)
+                pickle.dump(std, f, 2)
         self._time_std = std
         return self._time_std
 
@@ -338,7 +338,7 @@ class ImagingDataset(object):
             try:
                 with open(join(self.savedir, 'time_kurtosis.pkl'),
                           'rb') as f:
-                    time_kurtosis = pickle.load(f)
+                    time_kurtosis = pickle.load(f, fix_imports=True)
             except IOError:
                 pass
             else:
@@ -365,7 +365,7 @@ class ImagingDataset(object):
 
         if self.savedir is not None and not self._read_only:
             with open(join(self.savedir, 'time_kurtosis.pkl'), 'wb') as f:
-                pickle.dump(kurtosis, f, pickle.HIGHEST_PROTOCOL)
+                pickle.dump(kurtosis, f, 2)
         self._time_kurtosis = kurtosis
         return self._time_kurtosis
 
@@ -374,7 +374,7 @@ class ImagingDataset(object):
         try:
             with open(join(self.savedir, 'rois.pkl'), 'rb') as f:
                 return {label: ROIList(**v)
-                        for label, v in pickle.load(f).items()}
+                        for label, v in pickle.load(f, fix_imports=True).items()}
         except (IOError, pickle.UnpicklingError):
             return {}
 
@@ -605,7 +605,7 @@ class ImagingDataset(object):
 
         try:
             with open(join(self.savedir, 'rois.pkl'), 'rb') as f:
-                rois = pickle.load(f)
+                rois = pickle.load(f, fix_imports=True)
         except IOError:
             return
 
@@ -616,7 +616,7 @@ class ImagingDataset(object):
         else:
             if len(rois):
                 with open(join(self.savedir, 'rois.pkl'), 'wb') as f:
-                    pickle.dump(rois, f, pickle.HIGHEST_PROTOCOL)
+                    pickle.dump(rois, f, 2)
             else:
                 os.remove(join(self.savedir, 'rois.pkl'))
 
@@ -878,10 +878,10 @@ class ImagingDataset(object):
         # If sequences haven't been loaded yet, need to read sequences.pkl
         sequences = [seq._todict(savedir) for seq in self.sequences]
         with open(join(savedir, 'sequences.pkl'), 'wb') as f:
-            pickle.dump(sequences, f, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(sequences, f, 2)
 
         with open(join(savedir, 'dataset.pkl'), 'wb') as f:
-            pickle.dump(self._todict(), f, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self._todict(), f, 2)
 
     def segment(self, strategy, label=None, planes=None):
         """Segment an ImagingDataset to generate ROIs.
@@ -922,7 +922,7 @@ class ImagingDataset(object):
         try:
             with open(join(self.savedir, 'signals_{}.pkl'.format(channel)),
                       'rb') as f:
-                return pickle.load(f)
+                return pickle.load(f, fix_imports=True)
         except (IOError, pickle.UnpicklingError):
             return {}
 
@@ -1040,7 +1040,7 @@ class ImagingDataset(object):
                 'signals_{}.pkl'.format(signals['signal_channel']))
 
             pickle.dump(all_signals,
-                        open(signals_filename, 'wb'), pickle.HIGHEST_PROTOCOL)
+                        open(signals_filename, 'wb'), 2)
 
         return spikes, fits, parameters
 

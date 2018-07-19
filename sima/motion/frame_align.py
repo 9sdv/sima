@@ -115,10 +115,10 @@ def _frame_alignment_base(
     namespace.min_shift = np.zeros(3)
     namespace.max_shift = np.zeros(3)
 
-    print 'calculating frame alignment ...'
+    print('calculating frame alignment ...')
     namespace.count = 0
     namespace.progress = ProgressBar(
-        dataset.num_sequences*seq.shape[0]*seq.shape[1])
+        dataset.num_sequences*dataset.num_frames*dataset.frame_shape[0])
 
     lock = multiprocessing.Lock()
     if n_processes > 1:
