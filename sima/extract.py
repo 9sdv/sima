@@ -434,7 +434,11 @@ def extract_rois(dataset, rois, signal_channel=0, remove_overlap=True,
             except StopIteration:
                 break
 
+            if frame_idx >= signal.shape[1]:
+                break
+
             signal[:, frame_idx] = np.array(raw_result).flatten()
+
             if demixer is not None:
                 demix[:, frame_idx] = np.array(demix_result).flatten()
 

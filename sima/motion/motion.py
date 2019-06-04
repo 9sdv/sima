@@ -77,7 +77,7 @@ class MotionEstimationStrategy(with_metaclass(abc.ABCMeta, object)):
             for shift in it.chain.from_iterable(shifts))
         return shifts
 
-    def correct(self, dataset, savedir, channel_names=None, info=None,
+    def correct(self, dataset, savedir, channel_names=None,
                 correction_channels=None, trim_criterion=None):
         """Create a motion-corrected dataset.
 
@@ -91,9 +91,6 @@ class MotionEstimationStrategy(with_metaclass(abc.ABCMeta, object)):
             be appended.
         channel_names : list of str, optional
             Names for the channels. Defaults to ['0', '1', '2', ...].
-        info : dict
-            Data for the order and timing of the data acquisition.
-            See sima.ImagingDataset for details.
         correction_channels : list of int, optional
             Information from the channels corresponding to these indices
             will be used for motion correction. By default, all channels

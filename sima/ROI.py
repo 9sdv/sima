@@ -33,6 +33,7 @@ import sima.misc
 import sima.misc.imagej
 
 import os
+import h5py
 import glob
 import re
 import scipy.io
@@ -131,9 +132,9 @@ class ROI(object):
     """
 
     def __init__(self, mask=None, polygons=None, label=None, tags=None,
-                 id=None, im_shape=None):
+                 id=None, im_shape=None, masks_file=None):
 
-        if (mask is None) == (polygons is None):
+        if (mask is None) == (polygons is None) == (masks_file is None):
             raise TypeError('ROI: ROI must be initialized with either a mask \
                              or a polygon, not both and not neither')
 
@@ -143,6 +144,22 @@ class ROI(object):
             self.mask = mask
         else:
             self._mask = None
+
+        if masks_file is not None:
+            if mask is not None:
+                with h5py.File(masks_file) as f:
+                    if f.get(id) is not None:
+                        del f[id]
+                    f.create_dataset(
+                        id,
+                        data=np.array(map(lambda m: m.todense(), mask)),
+                        compression='gzip')
+            #with h5py.File(masks_file, 'r') as f:
+                #self._mask = map(lil_matrix, list(f[id]))
+            self._mask = None
+            self._masks_file = masks_file
+        else:
+            self._masks_file = None
 
         if polygons is not None:
             self.polygons = polygons
@@ -161,7 +178,7 @@ class ROI(object):
             'label={label}, id={id}, type={type}, im_shape={im_shape}'.format(
                 label=self.label,
                 id=self.id,
-                type='mask' if self._mask is not None else 'poly',
+                type='mask' if self._polys is None else 'poly',
                 im_shape=self.im_shape)
 
     def todict(self, type=None):
@@ -183,9 +200,12 @@ class ROI(object):
             self.polygons = self.polygons
 
         polygons = None if self._polys is None else self.coords
+        if self._masks_file is not None:
+            self._mask = None
+
         return {'mask': self._mask, 'polygons': polygons, 'id': self._id,
                 'label': self._label, 'tags': self._tags,
-                'im_shape': self._im_shape}
+                'im_shape': self._im_shape, 'masks_file': self._masks_file}
 
     @property
     def id(self):
@@ -245,6 +265,10 @@ class ROI(object):
 
     @property
     def mask(self):
+        if self._mask is None and self._masks_file is not None:
+            with h5py.File(self._masks_file, 'r') as f:
+                self._mask = map(lil_matrix, list(f[self.id]))
+
         if self._mask is None and self.im_shape is None:
             raise Exception('Polygon ROIs must have an im_shape set')
         if self._mask is not None:
@@ -271,6 +295,7 @@ class ROI(object):
     @mask.setter
     def mask(self, mask):
         self._mask = _reformat_mask(mask)
+        self._masks_file = None
         self._polys = None
 
     def __array__(self):
@@ -460,7 +485,7 @@ class ROIList(list):
         return super(ROIList, self).__repr__().replace(
             '\n', '\n    ')
 
-    def save(self, path, label=None, save_type=None):
+    def save(self, path, label=None, save_type=None, masks_file=None):
         """Save an ROI set to a file. The file can contain multiple
         ROIList objects with different associated labels. If the file
         already exists, the ROIList will be added without deleting the
@@ -481,6 +506,20 @@ class ROIList(list):
 
         time_fmt = '%Y-%m-%d-%Hh%Mm%Ss'
         timestamp = datetime.strftime(datetime.now(), time_fmt)
+
+        if masks_file is not None:
+            f = h5py.File(masks_file)
+            for roi in self:
+                try:
+                    if f.get(roi.id) is not None:
+                        del f[roi.id]
+                    f.create_dataset(
+                        roi.id, data=np.array(map(lambda m: m.todense(), roi.mask)),
+                        compression='gzip')
+                except:
+                    import pdb; pdb.set_trace()
+                roi._masks_file = os.path.abspath(masks_file)
+            f.close()
 
         rois = [roi.todict(type=save_type) for roi in self]
         try:

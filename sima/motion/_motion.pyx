@@ -249,6 +249,73 @@ def _align_frame(
         warnings.simplefilter("ignore")
         return (corrected_frame.T / count.T).T
 
+@cython.boundscheck(False)  # turn off bounds-checking for entire function
+def _align_frame2(
+        np.ndarray[FLOAT_TYPE_t, ndim=4] frame,
+        np.ndarray[INT_TYPE_t, ndim=3] displacements,
+        np.ndarray[INT_TYPE_t, ndim=3] displacements2,
+        corrected_frame_size):
+    """Correct a frame based on previously estimated displacements.
+
+    Parameters
+    ----------
+    frame : array
+        Uncorrected imaging frame from each each channel.
+    displacements : array
+        The displacements, adjusted so that (0,0) corresponds to the corner.
+        Shape: (num_planes, num_rows, 2).
+
+    Returns
+    -------
+    array : float32
+        The corrected frame, with unobserved locations indicated as NaN.
+    """
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=4] corrected_frame = np.zeros(
+        corrected_frame_size)
+    cdef np.ndarray[INT_TYPE_t, ndim=3] count = np.zeros(
+        corrected_frame_size[:-1], dtype=int)
+    cdef int num_cols, p, i, j, x, y, z, c, y_idx, x_idx
+    cdef int half_cols
+
+    num_cols = frame.shape[2]
+    half_cols = num_cols/2
+    if displacements.shape[2] == 2:
+        y_idx = 0
+        x_idx = 1
+    else:
+        y_idx = 1
+        x_idx = 2
+
+    for p in range(frame.shape[0]):
+        for i in range(frame.shape[1]):
+            if y_idx == 1:
+                z = p + displacements[p, i, 0]
+            else:
+                z = p
+            y = i + displacements[p, i, y_idx]
+            for j in range(half_cols):
+                x = displacements[p, i, x_idx] + j
+                count[z, y, x] += 1
+                for c in range(frame.shape[3]):
+                    corrected_frame[z, y, x, c] += frame[p, i, j, c]
+
+    for p in range(frame.shape[0]):
+        for i in range(frame.shape[1]):
+            if y_idx == 1:
+                z = p + displacements2[p, i, 0]
+            else:
+                z = p
+            y = i + displacements2[p, i, y_idx]
+            for j in range(half_cols, num_cols):
+                x = displacements2[p, i, x_idx] + j
+                count[z, y, x] += 1
+                for c in range(frame.shape[3]):
+                    corrected_frame[z, y, x, c] += frame[p, i, j, c]
+ 
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return (corrected_frame.T / count.T).T
+
 def observation_counts(
         frame_shape,
         np.ndarray[INT_TYPE_t, ndim=3] displacements,

@@ -68,9 +68,10 @@ from scipy.ndimage.interpolation import geometric_transform
 
 import sima.misc
 from sima.motion._motion import _align_frame
+from sima.motion._motion import _align_frame2
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from sima.misc.tifffile import TiffFileWriter
+    from sima.misc.tifffile import TiffFileWriter, TiffFile
 
 
 class Sequence(with_metaclass(ABCMeta, object)):
@@ -554,6 +555,8 @@ class _Sequence_TIFF_Interleaved(Sequence):
         self._num_channels = num_channels
         self._path = abspath(path)
         self._len = len_
+        self._images = TiffFile(self._path).asarray(memmap=True)
+        self._len = len(self._images)/num_channels
 
     def __iter__(self):
         base_iter = self._iter_pages()
@@ -567,15 +570,19 @@ class _Sequence_TIFF_Interleaved(Sequence):
                  for _ in range(self._num_planes)], 0)
 
     def _get_frame(self, n):
-        images = Image.open(self._path, 'r')
+        #images = Image.open(self._path, 'r')
+        #images = TiffFile(self._path).asarray(memmap=True)
 
         def _get_im(n, p, c):
             """Get the image corresponding to time n, plane p, channel c"""
-            images.seek(n * self._num_planes * self._num_channels +
-                        p * self._num_channels + c)
-            return np.array(images).astype(float)
+            #images.seek(n * self._num_planes * self._num_channels +
+            #            p * self._num_channels + c)
+            #return np.array(images).astype(float)
+            return self._images[n * self._num_planes * self._num_channels +
+                          p * self._num_channels + c]
 
-        images.seek(n * self._num_planes * self._num_channels)
+        #images.seek(n * self._num_planes * self._num_channels)
+        self._images[n * self._num_planes * self._num_channels]
         frame = np.concatenate(
             [np.expand_dims(
                 np.concatenate(
@@ -583,21 +590,24 @@ class _Sequence_TIFF_Interleaved(Sequence):
                      for c in range(self._num_channels)],
                     axis=2), 0)
              for p in range(self._num_planes)], 0)
-        images.close()
-        return frame
+        #images.close()
+        return frame.astype(int)
 
     def _iter_pages(self):
         idx = 0
-        images = Image.open(self._path, 'r')
+        #images = Image.open(self._path, 'r')
+        #images = Tifffile(self._path).asarray(memmap=True)
         while True:
             try:
-                images.seek(idx)
+                #images.seek(idx)
+                self._images[idx]
             except EOFError:
                 break
             else:
                 idx += 1
-                yield np.array(images).astype(float)
-        images.close()
+                #yield np.array(images).astype(float)
+                yield self._images
+        #images.close()
 
     def _todict(self, savedir=None):
         d = {'__class__': self.__class__,
@@ -1011,9 +1021,9 @@ class _MotionCorrectedSequence(_WrapperSequence):
         return self._align(self._base._get_frame(t), self.displacements[t])
 
     def __getitem__(self, indices):
+        indices = indices if isinstance(indices, tuple) else (indices,)
         if len(indices) > 5:
             raise ValueError
-        indices = indices if isinstance(indices, tuple) else (indices,)
         times = indices[0]
         if indices[0] not in (None, slice(None)):
             new_indices = (slice(None),) + indices[1:]
@@ -1039,6 +1049,313 @@ class _MotionCorrectedSequence(_WrapperSequence):
             'displacements': self.displacements.astype('int16'),
             'extent': self._frame_shape[:3],
         }
+
+
+class _MotionCorrectedSequence2(_WrapperSequence):
+    def __init__(self, base, displacements, extent=None):
+        super(_MotionCorrectedSequence2, self).__init__(base)
+        if np.min(displacements) < 0:
+            raise ValueError("All displacements must be non-negative")
+        self.displacements = displacements.astype('int')
+        if extent is None:
+            max_disp = np.array([np.nanmax(displacements[..., 0].reshape(-1)),
+                                 np.nanmax(displacements[..., 1].reshape(-1))])
+            extent = np.array(base.shape)[1:-1]
+            extent[1:3] += max_disp
+        assert len(extent) == 3
+        self._frame_shape_zyx = tuple(extent)   # (planes, rows, columns)
+
+    @ property
+    def _frame_shape(self):
+        return self._frame_shape_zyx + (self._base.shape[4],)
+
+    def __len__(self):
+        return len(self._base)  # Faster to calculate len without aligning
+
+    def _align(self, frame, displacement_1, displacement_2):
+        if displacement_1.ndim == 3:
+            return _align_frame2(frame.astype(float), displacement_1.astype(int),
+                                  displacement_2.astype(int),
+                                self._frame_shape)
+        else:
+            raise Exception('why am i here?')
+
+    @property
+    def shape(self):
+        # Avoid aligning image
+        return (len(self),) + self._frame_shape
+
+    def __iter__(self):
+        for frame, disp1, disp2 in zip(self._base, self.displacements[:, :, :, 0],
+                                       self.displacements[:, :, :, 1]):
+            yield self._align(frame, disp1, disp2)
+
+    def _get_frame(self, t):
+        return self._align(self._base._get_frame(t), self.displacements[t, :, :, 0],
+                           self.displacements[t, :, :, 1])
+
+    def __getitem__(self, indices):
+        indices = indices if isinstance(indices, tuple) else (indices,)
+        if len(indices) > 5:
+            raise ValueError
+        times = indices[0]
+        if indices[0] not in (None, slice(None)):
+            new_indices = (slice(None),) + indices[1:]
+            return _MotionCorrectedSequence2(
+                self._base[times],
+                self.displacements[times],
+                self._frame_shape[:-1]
+            )[new_indices]
+        if len(indices) == 5:
+            chans = indices[4]
+            return _MotionCorrectedSequence2(
+                self._base[:, :, :, :, chans],
+                self.displacements,
+                self._frame_shape[:-1]
+            )[indices[:4]]
+        # TODO: similar for planes ???
+        return _IndexedSequence(self, indices)
+
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'displacements': self.displacements.astype('int16'),
+            'extent': self._frame_shape[:3],
+        }
+
+
+class _2DInterpGapFilledSequence(_WrapperSequence):
+    """Sequence for doing random stuff.
+
+    Parameters
+    ----------
+    base : Sequence
+    kernel_size : Size of 2D gaussian kernel to use for interpolating nans.
+
+    """
+
+    def __init__(self, base, kernel_size):
+        super(_2DInterpGapFilledSequence, self).__init__(base)
+
+        from astropy.convolution import Gaussian2DKernel
+        from astropy.convolution import interpolate_replace_nans
+
+        self._kernel_size = kernel_size
+        self._shape = self._base.shape
+        self._interp_fn = interpolate_replace_nans
+
+        self._kernel = Gaussian2DKernel(self._kernel_size)
+
+
+    def _transform(self, frame):
+        _frame = np.empty(frame.shape)
+        for p, plane in enumerate(frame):
+            for c, channel in enumerate(np.rollaxis(plane, 2, 0)):
+                _frame[p, :, :, c] = self._interp_fn(channel, self._kernel)
+        return _frame
+
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._transform(frame)
+
+    def __iter__(self):
+        for frame in self._base:
+            yield self._transform(frame)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'kernel_size': self._kernel_size
+        }
+
+
+class _2DInterpGapFilledMaskedSequence(_WrapperSequence):
+    """Sequence for doing random stuff.
+
+    Parameters
+    ----------
+    base : Sequence
+    kernel_size : Size of 2D gaussian kernel to use for interpolating nans.
+
+    """
+
+    def __init__(self, base, kernel_size):
+        super(_2DInterpGapFilledMaskedSequence, self).__init__(base)
+
+        from astropy.convolution import Gaussian2DKernel
+        from astropy.convolution import interpolate_replace_nans
+
+        self._kernel_size = kernel_size
+        self._shape = self._base.shape
+        self._interp_fn = interpolate_replace_nans
+        self._kernel = Gaussian2DKernel(self._kernel_size)
+        self._cutoff = np.prod(self._shape[1:])/3
+
+        seq_dict = base._todict()
+        self._unmasked_base = seq_dict.pop('__class__')._from_dict(seq_dict)
+        seq_copy = self._unmasked_base
+        while True:
+            if isinstance(seq_copy._base, _MaskedSequence):
+                    break
+
+            try:
+                seq_copy._base._base
+                seq_copy = seq_copy._base
+            except:
+                raise Exception("Masked Sequence not found")
+
+        seq_copy._base = seq_copy._base._base
+
+    def _transform(self, frame_masked, frame_unmasked):
+        nan_locations = np.where(np.isnan(frame_masked))[0].shape[0]
+        if nan_locations > self._cutoff:
+            return frame_masked
+
+        frame_mask = np.where(
+            np.logical_and(np.isnan(frame_masked), np.isfinite(frame_unmasked)))
+
+        _frame = np.empty(frame_unmasked.shape)
+        for p, plane in enumerate(frame_unmasked):
+            for c, channel in enumerate(np.rollaxis(plane, 2, 0)):
+                _frame[p, :, :, c] = self._interp_fn(channel, self._kernel)
+        _frame[frame_mask] = np.nan
+        return _frame
+
+
+    def _get_frame(self, t):
+        frame_masked = self._base._get_frame(t)
+        frame_unmasked = self._unmasked_base._get_frame(t)
+        return self._transform(frame_masked, frame_unmasked)
+
+    def __iter__(self):
+        for frame_masked, frame_unmasked in zip(self._base,
+                                                self._unmasked_base):
+            yield self._transform(frame_masked, frame_unmasked)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'kernel_size': self._kernel_size
+        }
+
+
+
+
+class _ClippedSequence(_WrapperSequence):
+    """Sequence for applying a NaN Max along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, min_value, max_value):
+        super(_ClippedSequence, self).__init__(base)
+        self._min_value = min_value
+        self._max_value = max_value
+        self._shape = self._base.shape
+
+    def _transform(self, frame):
+        #frame -= self._min_value
+        frame = np.array(frame)
+        frame[frame < self._min_value] = 0
+        #frame = np.clip(frame, 0, self._max_value-self._min_value)
+        frame = np.clip(frame, 0, self._max_value)
+        #frame[frame != 0] += self._min_value
+        return frame
+
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return self._transform(frame)
+
+    def __iter__(self):
+        for frame in self._base:
+            yield self._transform(frame)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'min_value': self._min_value,
+            'max_value': self._max_value
+        }
+
+
+#from skimage.filter.rank import enhance_contrast_percentile
+from skimage.morphology import disk
+class _XSequence(_WrapperSequence):
+    """Sequence for applying a NaN Max along one of the dimensions.
+
+    Parameters
+    ----------
+    base : Sequence
+    axis : axis to perform nanmean along
+
+    """
+
+    def __init__(self, base, axis=0):
+        super(_XSequence, self).__init__(base)
+        self._axis = axis
+        self._shape = self._base.shape[:axis+1] + (1,) + \
+            self._base.shape[axis+2:]
+
+    def _transform(self, frame):
+        frame = frame.squeeze()
+        return enhance_contrast_percentile(frame/np.max(frame), disk(3), p1=0.75)
+
+
+    def _get_frame(self, t):
+        frame = self._base._get_frame(t)
+        return np.array(map(self._transform, frame))
+
+    def __iter__(self):
+        for frame in self._base:
+            yield self._transform(frame)
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def __len__(self):
+        return len(self._base)
+
+    def _todict(self, savedir=None):
+        return {
+            '__class__': self.__class__,
+            'base': self._base._todict(savedir),
+            'axis': self._axis
+        }
+
 
 class _MedianSequence(_WrapperSequence):
     """Sequence for applying a NaN Max along one of the dimensions.
@@ -1078,7 +1395,7 @@ class _MedianSequence(_WrapperSequence):
             'axis': self._axis
         }
 
-class _ClippedSequence(_WrapperSequence):
+class _ClippedSequence2(_WrapperSequence):
     """Sequence for applying a NaN Max along one of the dimensions.
 
     Parameters
@@ -1363,9 +1680,9 @@ class _TimeAvgSequence(_WrapperSequence):
 
     """
 
-    def __init__(self, base, axis=0):
+    def __init__(self, base, factor, axis=0):
         super(_TimeAvgSequence, self).__init__(base)
-        self._factor = 4
+        self._factor = factor
         self._shape = (self._base.shape[0]//self._factor,) + \
             self._base.shape[1:]
 
@@ -1390,6 +1707,7 @@ class _TimeAvgSequence(_WrapperSequence):
         return {
             '__class__': self.__class__,
             'base': self._base._todict(savedir),
+            'factor': self._factor
         }
 
 class _MeanSubtractedSequence(_WrapperSequence):
@@ -2140,7 +2458,6 @@ class _3dRegSequence(_WrapperSequence):
         frame2 = np.zeros(self._vol.shape)
         counts = np.zeros(self._vol.shape)
 
-        import pdb; pdb.set_trace()
         patch_idx = t%len(self._displacements[0])
         plane_idx = patch_idx//self._patch_number
         frame_idx = t//len(self._displacements[0])
@@ -2181,7 +2498,7 @@ class _3dRegSequence(_WrapperSequence):
 
     def _transform(self, frame, t):
         frame2 = np.zeros(self._vol.shape)
-        counts = np.zeros(self._vol.shape)
+        counts = np.empty(self._vol.shape)*np.nan
 
         if t < len(self._displacements):
             for i, plane_shifts in enumerate(np.array(self._displacements[t])):
@@ -2226,9 +2543,11 @@ class _3dRegSequence(_WrapperSequence):
                 except:
                     import pdb; pdb.set_trace()
                 counts[plane_shifts[0], shifts[0]:shifts[0]+(y2-y1),
-                        shifts[1]:shifts[1]+(x2-x1)] = data.astype(bool)
+                        shifts[1]:shifts[1]+(x2-x1)] = np.isfinite(data)
+                if not self._normal:
+                    break
 
-        frame2[..., -1] = frame2[..., -1]/ counts[..., -1]
+        frame2[..., -1] = frame2[..., -1]/np.clip(counts[..., -1], 1, None)
         return np.concatenate((self._vol, frame2, counts), axis=-1)
 
     def _get_frame(self, t):
